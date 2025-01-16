@@ -42,7 +42,8 @@ namespace RabbitHelper
                 body: metaData.body,
                 routingKey: metaData.queue,
                 basicProperties: metaData.properties,
-                mandatory: true
+                mandatory: true,
+                cancellationToken: ct
             );
         }
 
