@@ -1,5 +1,5 @@
-﻿global using RabbitMQ.Client;
-global using System.Text.Json;
+﻿using RabbitMQ.Client;
+using System.Text.Json;
 using CToken = System.Threading.CancellationToken;
 
 namespace RabbitHelper
