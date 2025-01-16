@@ -6,7 +6,7 @@ namespace RabbitHelper
 {
     public static class RabbitHelperService
     {
-        private record MetaData(string queue, byte[] body, BasicProperties properties, Guid requestId);
+        public record MetaData(string queue, byte[] body, BasicProperties properties, Guid requestId);
 
         private static IConnection? _connection = null;
         private static IChannel? _channel = null;
@@ -29,7 +29,7 @@ namespace RabbitHelper
             return new(queue, body, properties, Guid.NewGuid());
         }
 
-        private static async Task Publish(MetaData metaData)
+        private static async Task Publish(MetaData metaData, CToken ct)
         {
             if (_channel is null || _connection is null)
                 await Init();
@@ -63,37 +63,43 @@ namespace RabbitHelper
                     );
             });
         }
-
-        public static async Task<MetaData> PublishOnQueueAsync<TModel>(object data) where TModel : class
+        
+        public static async Task<MetaData> PublishOnQueueAsync<TModel>(object data, CToken ct) where TModel : class
         {
             if (_channel is null || _connection is null)
                 return null!;
 
             var metaData = GetMetaData<TModel>(data, null);
-            await Publish(metaData);
+            await Publish(metaData, ct);
 
-            await Task.CompletedTask;
             return metaData;
         }
 
-        public static async Task PublishOnQueueAsync<TModel>(object data, CToken ct, Func<TModel?, CToken, Task> handleResult) where TModel : class
+        public static async Task PublishOnQueueAsync<TModel>(object data, CToken ct, Func<TModel, CToken, Task> handleResult) where TModel : class
         {
-            var metaData = GetMetaData<TModel>(data, null);
-            await PublishOnQueueAsync<TModel>(data, new BasicProperties() { CorrelationId = metaData.requestId.ToString() });
+            var metaData = await PublishOnQueueAsync<TModel>(data, ct);
+
+            if (_channel is null || _connection is null)
+                await Init();
+
+            if (_channel is null || _connection is null)
+                return;
 
             _channel.BasicReturnAsync += async (sender, e) =>
             {
                 if (e.RoutingKey.Equals(metaData.queue))
                 {
                     var result = JsonSerializer.Deserialize<TModel>(e.Body.ToArray());
-                    if (e.RoutingKey.Equals(metaData.requestId))
+
+                    if(result is null)
+                        return;
+                
+                    if (e.Equals(metaData.requestId))
                         await handleResult(result, ct);
                 }
             };
 
             await Task.CompletedTask;
         }
-
-        
     }
 }
