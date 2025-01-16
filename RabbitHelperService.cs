@@ -6,10 +6,21 @@ namespace RabbitHelper
 {
     public static class RabbitHelperService
     {
+        private record MetaData(string queue, byte[] body, BasicProperties properties, Guid requestId);
+
         private static IConnection? _connection = null;
         private static IChannel? _channel = null;
 
-        private record MetaData(string queue, byte[] body, BasicProperties properties, Guid requestId);
+        public static async Task Init(string host = "localhost")
+        {
+            if (_connection is not null && _connection!.IsOpen)
+                return;
+
+            var factory = new ConnectionFactory() { HostName = host };
+            _connection = await factory.CreateConnectionAsync();
+            _channel = await _connection.CreateChannelAsync();
+        }
+
         private static MetaData GetMetaData<TModel>(object data, BasicProperties? properties) where TModel : class
         {
             var queue = nameof(TModel);
@@ -33,16 +44,6 @@ namespace RabbitHelper
                 basicProperties: metaData.properties,
                 mandatory: true
             );
-        }
-
-        public static async Task Init(string host = "localhost")
-        {
-            if (_connection is not null && _connection!.IsOpen)
-                return;
-
-            var factory = new ConnectionFactory() { HostName = host };
-            _connection = await factory.CreateConnectionAsync();
-            _channel = await _connection.CreateChannelAsync();
         }
 
         public static async Task DeclareQueues<TModel>(this TModel model) where TModel : class
