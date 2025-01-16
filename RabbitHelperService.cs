@@ -77,10 +77,11 @@ namespace RabbitHelper
 
         public static async Task PublishOnQueueAsync<TModel>(object data, CToken ct, Func<TModel, CToken, Task> handleResult) where TModel : class
         {
-            var metaData = await PublishOnQueueAsync<TModel>(data, ct);
 
             if (_channel is null || _connection is null)
                 await Init();
+
+            var metaData = await PublishOnQueueAsync<TModel>(data, ct);
 
             if (_channel is null || _connection is null)
                 return;
