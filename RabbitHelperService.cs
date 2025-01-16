@@ -1,7 +1,5 @@
 ﻿global using RabbitMQ.Client;
 global using System.Text.Json;
-using System.Dynamic;
-using System.Runtime.CompilerServices;
 
 namespace RabbitHelper
 {
@@ -10,11 +8,30 @@ namespace RabbitHelper
         private static IConnection? _connection = null;
         private static IChannel? _channel = null;
 
-        private (string queue, byte[] body) GetMetaData<T>(object data)
+        private record MetaData(string queue, byte[] body, BasicProperties properties, Guid requestId);
+        private static MetaData GetMetaData<TModel>(object data, BasicProperties? properties) where TModel : class
         {
-            var queue = nameof(T);
+            var queue = nameof(TModel);
             var body = JsonSerializer.SerializeToUtf8Bytes(data);
-            return (queue, body);
+            properties ??= new BasicProperties();
+            return new(queue, body, properties, Guid.NewGuid());
+        }
+
+        private static async Task Publish(MetaData metaData)
+        {
+            if (_channel is null || _connection is null)
+                await Init();
+
+            if (_channel is null || _connection is null)
+                return;
+
+            await _channel.BasicPublishAsync(
+                exchange: "",
+                body: metaData.body,
+                routingKey: metaData.queue,
+                basicProperties: metaData.properties,
+                mandatory: true
+            );
         }
 
         public static async Task Init(string host = "localhost")
@@ -45,59 +62,26 @@ namespace RabbitHelper
             });
         }
         
-        public static async Task PublishOnQueueAsync<TModel>(this TModel model, object data, BasicProperties? properties = null) where TModel : class
+        public static async Task<MetaData> PublishOnQueueAsync<TModel>(object data, BasicProperties? properties = null) where TModel : class
         {
-            if (_channel is null || _connection is null)
-                return;
-
-            var metaData = GetMetaData<TModel>(data);
-
-            await _channel.BasicPublishAsync(
-                exchange: "",
-                body: body,
-                routingKey: queue,
-                basicProperties: properties ?? new BasicProperties(),
-                mandatory: true
-                );
-
-            await Task.CompletedTask;
-        }
-        public static async Task PublishOnQueueAsync<TModel>(object data, BasicProperties? properties = null) where TModel : class
-        {
-            if (_channel is null || _connection is null)
-                return;
-
-            var queue = nameof(TModel);
-            var body = JsonSerializer.SerializeToUtf8Bytes(data);
-
-            await _channel.BasicPublishAsync(
-                exchange: "",
-                body: body,
-                routingKey: queue,
-                basicProperties: properties ?? new BasicProperties(),
-                mandatory: true
-                );
-
-            await Task.CompletedTask;
+            var metaData = GetMetaData<TModel>(data, properties);
+            await Publish(metaData);
+            return Task.FromResult(metaData);
         }
 
         public static async Task PublishOnQueueAsync<TModel>(object data, 
             CancellationToken ct, 
             Func<TModel?, CancellationToken, Task> handleResult) where TModel : class
         {
-            if (_channel is null || _connection is null)
-                return;
-
-            var queue = nameof(TModel);
-            var requestId = Guid.NewGuid().ToString();
-            await PublishOnQueueAsync<TModel>(data, new BasicProperties() { CorrelationId = requestId });
+            var metaData = GetMetaData<TModel>(data, null);
+            await PublishOnQueueAsync<TModel>(data, new BasicProperties() { CorrelationId = metaData.requestId.ToString() });
 
             _channel.BasicReturnAsync += async (sender, e) =>
             {
-                if (e.RoutingKey.Equals(queue))
+                if (e.RoutingKey.Equals(metaData.queue))
                 {
                     var result = JsonSerializer.Deserialize<TModel>(e.Body.ToArray());
-                    if (e.RoutingKey.Equals(requestId))
+                    if (e.RoutingKey.Equals(metaData.requestId))
                         await handleResult(result, ct);
                 }
             };
