@@ -1,5 +1,6 @@
 ﻿global using RabbitMQ.Client;
 global using System.Text.Json;
+using CToken = System.Threading.CancellationToken;
 
 namespace RabbitHelper
 {
@@ -61,17 +62,20 @@ namespace RabbitHelper
                     );
             });
         }
-        
-        public static async Task<MetaData> PublishOnQueueAsync<TModel>(object data, BasicProperties? properties = null) where TModel : class
+
+        public static async Task<MetaData> PublishOnQueueAsync<TModel>(object data) where TModel : class
         {
-            var metaData = GetMetaData<TModel>(data, properties);
+            if (_channel is null || _connection is null)
+                return null!;
+
+            var metaData = GetMetaData<TModel>(data, null);
             await Publish(metaData);
-            return Task.FromResult(metaData);
+
+            await Task.CompletedTask;
+            return metaData;
         }
 
-        public static async Task PublishOnQueueAsync<TModel>(object data, 
-            CancellationToken ct, 
-            Func<TModel?, CancellationToken, Task> handleResult) where TModel : class
+        public static async Task PublishOnQueueAsync<TModel>(object data, CToken ct, Func<TModel?, CToken, Task> handleResult) where TModel : class
         {
             var metaData = GetMetaData<TModel>(data, null);
             await PublishOnQueueAsync<TModel>(data, new BasicProperties() { CorrelationId = metaData.requestId.ToString() });
@@ -89,26 +93,6 @@ namespace RabbitHelper
             await Task.CompletedTask;
         }
 
-        public static async Task PublishOnQueueAsync<TModel>(this TModel model, object data, Func<TModel, Task> handleResult) where TModel : class
-        {
-            if (_channel is null || _connection is null)
-                return;
-
-            var queue = nameof(TModel);
-            var requestId = Guid.NewGuid().ToString();
-            await PublishOnQueueAsync(model, data, new BasicProperties() { CorrelationId = requestId });
-
-            _channel.BasicReturnAsync += async (sender, e) =>
-            {
-                if (e.RoutingKey.Equals(queue))
-                {
-                    var result = JsonSerializer.Deserialize<TModel>(e.Body.ToArray());
-                    if (e.RoutingKey.Equals(requestId))
-                        await handleResult(result!);
-                }
-            };
-
-            await Task.CompletedTask;
-        }
+        
     }
 }
