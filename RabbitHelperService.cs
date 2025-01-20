@@ -22,9 +22,9 @@ namespace RabbitHelper
             _channel = await _connection.CreateChannelAsync();
         }
 
-        private static MetaData GetMetaData<TModel>(object data, BasicProperties? properties) where TModel : class
+        private static MetaData GetMetaData<T>(object data, BasicProperties? properties)
         {
-            var queue = nameof(TModel);
+            var queue = nameof(T);
             var body = JsonSerializer.SerializeToUtf8Bytes(data);
             properties ??= new BasicProperties()
             {
@@ -51,7 +51,7 @@ namespace RabbitHelper
             );
         }
 
-        public static async Task DeclareQueues<TModel>(this TModel model) where TModel : class
+        public static async Task DeclareQueues<T>(this T model) where T : class
         {
             if (_channel is null || _connection is null)
                 return;
@@ -69,24 +69,24 @@ namespace RabbitHelper
             });
         }
         
-        public static async Task<MetaData> PublishOnQueueAsync<TModel>(object data, CToken ct) where TModel : class
+        public static async Task<MetaData> PublishOnQueueAsync<T>(object data, CToken ct)
         {
             if (_channel is null || _connection is null)
                 return null!;
 
-            var metaData = GetMetaData<TModel>(data, null);
+            var metaData = GetMetaData<T>(data, null);
             await Publish(metaData, ct);
 
             return metaData;
         }
 
-        public static async Task PublishOnQueueAsync<TModel>(object data, CToken ct, Func<TModel, CToken, Task> handleResult) where TModel : class
+        public static async Task PublishOnQueueAsync<T>(object data, CToken ct, Func<T, CToken, Task> handleResult)
         {
 
             if (_channel is null || _connection is null)
                 await Init();
 
-            var metaData = await PublishOnQueueAsync<TModel>(data, ct);
+            var metaData = await PublishOnQueueAsync<T>(data, ct);
             var correlationId = metaData.properties.CorrelationId;
 
             if (_channel is null || _connection is null)
@@ -98,7 +98,7 @@ namespace RabbitHelper
                 {
                     if (e.BasicProperties.CorrelationId!.Equals(correlationId))
                     {
-                        var result = JsonSerializer.Deserialize<TModel>(e.Body.ToArray());
+                        var result = JsonSerializer.Deserialize<T>(e.Body.ToArray());
 
                         if (result is null) return;
                         await handleResult(result, ct);
